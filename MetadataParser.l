@@ -3,31 +3,60 @@
 
     #include "MetadataParser.tab.h"  // to get the token types from Bison
 
-    extern void yyerror(const char* yytext);
+    extern void yyerror(Lvm::Ast::MetadataNode* mtd, const char* yytext);
+
+//#define DEBUG_FLEX
+#ifndef DEBUG_FLEX
+    #define YIELD_TOKEN(tok) \
+        return TOKEN_##tok
+
+    #define YIELD_ITOKEN(tok) \
+        yylval.ival = atoi(yytext);return TOKEN_##tok
+
+    #define YIELD_FTOKEN(tok) \
+        yylval.fval = atof(yytext);return TOKEN_##tok
+
+    #define YIELD_STOKEN(tok) \
+        yylval.sval = strdup(yytext);return TOKEN_##tok
+#else
+    #define YIELD_TOKEN(tok) \
+        printf("TOKEN_%s\n", #tok);return TOKEN_##tok
+
+    #define YIELD_ITOKEN(tok) \
+        printf("TOKEN_%s\n", #tok);yylval.ival = atoi(yytext);return TOKEN_##tok
+
+    #define YIELD_FTOKEN(tok) \
+        printf("TOKEN_%s\n", #tok);yylval.fval = atof(yytext);return TOKEN_##tok
+
+    #define YIELD_STOKEN(tok) \
+        printf("TOKEN_%s\n", #tok);yylval.sval = strdup(yytext);return TOKEN_##tok
+#endif
+
+
 %}
 %option noyywrap
 %option yylineno
 %x COMMENT
 %%
 
-#                     {BEGIN(COMMENT);}
-<COMMENT>.            {}
-<COMMENT>\n           {BEGIN(INITIAL);}
+#                        {BEGIN(COMMENT);}
+<COMMENT>.               {}
+<COMMENT>\n              {BEGIN(INITIAL);}
 
-physical_volumes      {                              return TOKEN_PHYSICAL_VOLUMES;}
-logical_volumes       {                              return TOKEN_LOGICAL_VOLUMES;}
-\[                    {                              return TOKEN_LEFT_BRACKET;}
-\]                    {                              return TOKEN_RIGHT_BRACKET;}
-\{                    {                              return TOKEN_LEFT_BRACE;}
-\}                    {                              return TOKEN_RIGHT_BRACE;}
-\=                    {                              return TOKEN_EQUAL;}
-\,                    {                              return TOKEN_COMMA;}
+physical_volumes         { YIELD_TOKEN(PHYSICAL_VOLUMES);}
+logical_volumes          { YIELD_TOKEN(LOGICAL_VOLUMES );}
+\[                       { YIELD_TOKEN(LEFT_BRACKET    );}
+\]                       { YIELD_TOKEN(RIGHT_BRACKET   );}
+\{                       { YIELD_TOKEN(LEFT_BRACE      );}
+\}                       { YIELD_TOKEN(RIGHT_BRACE     );}
+\=                       { YIELD_TOKEN(EQUAL           );}
+\,                       { YIELD_TOKEN(COMMA           );}
 
-[0-9]+                { yylval.ival = atoi(yytext);  return TOKEN_INT_VALUE; }
-[0-9]+\.[0-9]+        { yylval.fval = atoi(yytext);  return TOKEN_FLOAT_VALUE; }
+[0-9]+                   { YIELD_ITOKEN(INT_VALUE      );}
+[0-9]+\.[0-9]+           { YIELD_FTOKEN(FLOAT_VALUE    );}
 
-\"[a-zA-Z0-9\-\_/]*\" {yylval.sval = strdup(yytext); return TOKEN_STRING_VALUE;}
-[a-zA-Z0-9\-\_]+      {yylval.sval = strdup(yytext); return TOKEN_NAME;}
+\"([ a-zA-Z0-9\-\_/])*\" { YIELD_STOKEN(STRING_VALUE   );}
+[a-zA-Z0-9\-\_]+         { YIELD_STOKEN(NAME           );}
 
 
 [ \t]  {}
@@ -36,7 +65,7 @@ logical_volumes       {                              return TOKEN_LOGICAL_VOLUME
 .      {
             char error[128] {};
             snprintf(error, 128, "line %d: lexer error, unknown lexem: `%s`", yylineno, yytext);
-            yyerror(error);
+            yyerror(NULL, error);
         }
 %%
 
