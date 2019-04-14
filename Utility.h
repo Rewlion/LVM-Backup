@@ -51,11 +51,8 @@ namespace Lvm
 	{
 		ParameterMap  Parameters;
 		VolumeGroup   VG;
-	};
 
-	struct BackupSettings
-	{
-		Metadata LvmMeta;
+		std::vector<char> Raw;
 	};
 
 	class Archive

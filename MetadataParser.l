@@ -16,6 +16,14 @@
     #define YIELD_FTOKEN(tok) \
         yylval.fval = atof(yytext);return TOKEN_##tok
 
+    #define YIELD_UQ_STOKEN(tok) \
+        do {\
+            const size_t l = strlen(yytext);\
+            yytext[l-1] = '\0';\
+            yylval.sval = strdup(yytext+1);\
+            return TOKEN_##tok;\
+        } while(0)
+
     #define YIELD_STOKEN(tok) \
         yylval.sval = strdup(yytext);return TOKEN_##tok
 #else
@@ -27,6 +35,15 @@
 
     #define YIELD_FTOKEN(tok) \
         printf("TOKEN_%s\n", #tok);yylval.fval = atof(yytext);return TOKEN_##tok
+
+    #define YIELD_UQ_STOKEN(tok) \
+        do {\
+            printf("TOKEN_%s\n", #tok);\
+            const size_t l = strlen(yytext);\
+            yytext[l-1] = '\0';\
+            yylval.sval = strdup(yytext+1);\
+            return TOKEN_##tok;\
+        } while(0)
 
     #define YIELD_STOKEN(tok) \
         printf("TOKEN_%s\n", #tok);yylval.sval = strdup(yytext);return TOKEN_##tok
@@ -55,7 +72,7 @@ logical_volumes          { YIELD_TOKEN(LOGICAL_VOLUMES );}
 [0-9]+                   { YIELD_ITOKEN(INT_VALUE      );}
 [0-9]+\.[0-9]+           { YIELD_FTOKEN(FLOAT_VALUE    );}
 
-\"([ a-zA-Z0-9\-\_/])*\" { YIELD_STOKEN(STRING_VALUE   );}
+\"([\* a-zA-Z0-9\-\_/])*\" { YIELD_UQ_STOKEN(STRING_VALUE);}
 [a-zA-Z0-9\-\_]+         { YIELD_STOKEN(NAME           );}
 
 

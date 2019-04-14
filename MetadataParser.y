@@ -75,7 +75,8 @@
 %%
 
 LVM_METADATA
-    : PARAMETERS VOLUME_GROUP                                  { mtd->Parameters = $1; mtd->VolumeGroup = $2; }
+    : PARAMETERS VOLUME_GROUP                                { mtd->Parameters = $1; mtd->VolumeGroup = $2; }
+    | VOLUME_GROUP PARAMETERS                                { mtd->VolumeGroup = $1; mtd->Parameters = $2; }
 
 VOLUME_GROUP
 	: TOKEN_NAME "{" PARAMETERS VOLUME_GROUP_SECTIONS "}"      { $$ = new Lvm::Ast::VolumeGroupNode(new Lvm::Ast::NameNode($1), $3, $4); free($1);}
