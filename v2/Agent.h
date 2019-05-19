@@ -108,9 +108,6 @@ namespace Lvm::Backup
         PhysicalVolumeHeader ReadPvHeader(std::ifstream& f) const;
         MtdHeader ReadMtdHeader(std::ifstream& f) const;
         std::vector<LocationDescriptor> ReadLocationsArea(std::ifstream& f) const;
-
 		std::optional<PvInformation> ReadPvInformation(const std::string& dev) const;
-		PvInformationMap CollectPvsInformation(const Lvm::Metadata& mtd) const;
-		PVSegmentsMap CollectSegmentsDescription(const Lvm::Metadata& mtd) const;
 	};
 }

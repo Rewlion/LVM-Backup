@@ -8,15 +8,9 @@
 
 namespace Lvm
 {	
-	struct Pair
-	{
-		std::string Name;
-		int Number;
-	};
-
 	typedef std::vector<char> RawMetadata;
 	typedef std::vector<std::string> Array;
-	typedef std::variant<Pair, Array, std::string, int, float> Value;
+	typedef std::variant<Array, std::string, int, float> Value;
 
 	typedef std::map<std::string, Value> ParameterMap;
 

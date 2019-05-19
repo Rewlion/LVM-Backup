@@ -5,4 +5,4 @@ main:
 
 
 clean:
-	rm lex.yy.c MetadataParser.tab.*
+	rm lex.yy.c MetadataParser.tab.* agent MetadataParser.output
