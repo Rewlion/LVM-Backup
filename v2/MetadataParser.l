@@ -57,8 +57,8 @@ logical_volumes          { YIELD_TOKEN(LOGICAL_VOLUMES );}
 \=                       { YIELD_TOKEN(EQUAL           );}
 \,                       { YIELD_TOKEN(COMMA           );}
 
-[0-9]+                   { YIELD_STOKEN(INT_VALUE      );}
-[0-9]+\.[0-9]+           { YIELD_STOKEN(FLOAT_VALUE    );}
+[0-9]+                   { YIELD_STOKEN(STRING_VALUE      );}
+[0-9]+\.[0-9]+           { YIELD_STOKEN(STRING_VALUE    );}
 
 \"([\* a-zA-Z0-9\-\_/])*\" { YIELD_UQ_STOKEN(STRING_VALUE);}
 [a-zA-Z0-9\-\_]+         { YIELD_STOKEN(NAME           );}

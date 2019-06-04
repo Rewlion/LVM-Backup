@@ -40,24 +40,8 @@
 
 %code {
     #include "Utility.h"
-
-    inline int CatchINT(char* val)
-    {
-      const int ival = atoi(val);
-      free(val);
-      return ival;
-    }
-
-    inline int CatchFLOAT(char* val)
-    {
-      const float fval = atof(val);
-      free(val);
-      return fval;
-    }
 }
 
-%token <sval> TOKEN_INT_VALUE
-%token <sval> TOKEN_FLOAT_VALUE
 %token <sval> TOKEN_STRING_VALUE
 %token <sval> TOKEN_NAME
 
@@ -127,9 +111,7 @@ PARAMETER
 	: TOKEN_NAME "=" VALUE                                     { $$ = new Lvm::Ast::ParameterNode(new Lvm::Ast::NameNode($1), $3); free($1); }
 
 VALUE
-	: TOKEN_INT_VALUE                                          { $$ = new Lvm::Ast::ValueNode( CatchINT($1) ); }
-	| TOKEN_FLOAT_VALUE                                        { $$ = new Lvm::Ast::ValueNode( CatchFLOAT($1) ); }
-	| TOKEN_STRING_VALUE                                       { $$ = new Lvm::Ast::ValueNode( $1 ); free($1); }
+	: TOKEN_STRING_VALUE                                       { $$ = new Lvm::Ast::ValueNode( $1 ); free($1); }
 	| ARRAY                                                    { $$ = $1; }
 
 ARRAY
