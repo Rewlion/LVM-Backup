@@ -2,6 +2,11 @@
 
 #include <unistd.h>
 #include <iostream>
+#include <assert.h>
+
+const std::vector<std::string> devices = {
+	"/dev/sdb"
+};
 
 int main(int argc, char** argv)
 {
@@ -18,15 +23,15 @@ int main(int argc, char** argv)
 
 		case 'b':
 		{	
-			agent.Backup({optarg});
+			agent.Backup(optarg, devices);
 			return 0;
 		}
 
 		default:
 		{
-			std::printf("Usage: %s [-r archive_name | -b physical_volume {e.g. /dev/sdb}]\n"
-						"-r: restore lvm2 from the archive.\n"
-						"-b: backup lvm2 to the archive.\n", argv[0]);
+			std::printf("Usage: %s [-r archive_name | -b logical_volume {e.g. /dev/SomeVolumeGroup/LV1}]\n"
+						"-r: restore lv from the archive.\n"
+						"-b: backup lv to the archive.\n", argv[0]);
 			return -1;
 		}
 	}

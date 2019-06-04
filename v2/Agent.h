@@ -89,19 +89,44 @@ namespace Lvm::Backup
         uint64_t ExtentSize;
     };
 
+    struct LinearSegmentDescription
+    {
+        size_t StartExtent;
+        size_t ExtentCount;
+        char   Device[256];
+        size_t Offset;
+        size_t PeStart;
+    } __attribute__((packed));
+
+    struct RawMtdInfo
+    {
+        char   Name[256];
+        size_t DataSize;
+    } __attribute__((packed));
+
+    struct RawMtd
+    {
+        RawMtdInfo        Info;
+        std::vector<char> Data;
+    };
+
     typedef std::unordered_map<std::string, Lvm::Metadata> VgMtdMap;
 
 	class Agent
 	{
 	public:
-        void Backup(const std::vector<std::string>& devices) const;
+        void Backup(const std::string& lv, const std::vector<std::string>& devices) const;
         void Restore(const std::string& acrhive) const;
 
         void DumpMtd(const std::string& dev) const;
+        void DumpMTDs(const std::vector<std::string>& devices) const;
 	private:
         VgMtdMap CollectVgMtds(const std::vector<std::string>& devices) const;
         std::optional<Metadata> ReadVgMtd(const std::string& dev) const;
         std::optional<std::vector<char>> ReadRawMtd(std::ifstream& f) const; 
+
+        RawMtd CollectRawMtd(const char* device) const;
+        std::vector<RawMtd> CollectPhysicalVolumesRawMtd(const std::vector<LinearSegmentDescription>& segments) const;
 
         std::optional<PhysicalVolumeLabelHeader> ReadPvLabel(std::ifstream& f) const;
         std::vector<DataAreaDescriptor> ReadDataArea(std::ifstream& f) const;

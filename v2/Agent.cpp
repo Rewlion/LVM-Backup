@@ -6,6 +6,8 @@
 #include <fstream>
 #include <unistd.h>
 #include <assert.h>
+#include <algorithm>
+#include <tuple>
 ////////////////////////////
 #include "Ast.h"
 struct yy_buffer_state;
@@ -62,20 +64,236 @@ namespace
         converter.SetMetadata(mtd);
         ast->Accept(&converter);
     }
+
+    std::tuple<Lvm::Metadata, Lvm::LogicalVolume> FindMtdWithLV(const Lvm::Backup::VgMtdMap& mtdMap, const std::string& lvName)
+    {
+        for(auto&[vgName, mtd] : mtdMap)
+        {
+            const auto& lvs = mtd.VG.LogicalVolumes;
+            const auto& it = std::find_if(lvs.begin(), 
+                                          lvs.end(), 
+                                          [&](auto& lv) { return lvName == lv.Name; }
+                                        );
+            if( it != lvs.end())
+                return {mtd, *it};
+        }
+
+        throw "No LV in MTD.";
+    }
+
+    struct PhysicalVolumeInfo
+    {
+        std::string Device;
+        uint64_t    PeStart;
+    };
+
+    typedef std::unordered_map<std::string, PhysicalVolumeInfo> PvInfoMap;
+
+    PvInfoMap CollectPhysicalVolumesInfos(const Lvm::Metadata& mtd)
+    {
+        PvInfoMap infos;
+        for(const auto& pv : mtd.VG.PhysicalVolumes)
+        {
+            PhysicalVolumeInfo info;
+            info.Device = std::get<std::string>(pv.Parameters.at("device"));
+            info.PeStart = std::stoi(std::get<std::string>(pv.Parameters.at("pe_start")));
+            
+            infos[pv.Name] = info;
+            std::printf("%s : %s(pe_start:%lu)\n", pv.Name.c_str(), info.Device.c_str(), info.PeStart);
+            
+        }
+
+        return infos;
+    }
+
+    std::vector<Lvm::Backup::LinearSegmentDescription> CollectSegmentDescriptions(const Lvm::LogicalVolume& lv, const PvInfoMap& pvInfos)
+    {
+        std::vector<Lvm::Backup::LinearSegmentDescription> segments;
+        for(auto& segment : lv.Segments)
+        {
+            Lvm::Backup::LinearSegmentDescription sd;
+            sd.StartExtent = std::stoi(std::get<std::string>(segment.Parameters.at("start_extent")));
+            sd.ExtentCount = std::stoi(std::get<std::string>(segment.Parameters.at("extent_count")));
+
+            Lvm::Array array = std::get<Lvm::Array>(segment.Parameters.at("stripes"));
+            const std::string device = pvInfos.at(array[1]).Device;
+            std::snprintf(sd.Device, 255, "%s", device.c_str());
+            sd.Offset = std::stoi(array[0].c_str());
+            sd.PeStart = pvInfos.at(array[1]).PeStart;
+
+            std::printf("%s:\n  start_extent:%lu\n  extent_count:%lu\n  device:%s\n  offset:%lu\n", 
+                segment.Name.c_str(), sd.StartExtent, sd.ExtentCount, sd.Device, sd.Offset );
+
+            segments.push_back(sd);
+        }
+
+        return segments;
+    }
+
+    //TODO FIXME: Array order is reversed because of the grammar in the parser.
+    void GrammarFix(Lvm::Metadata& mtd, Lvm::LogicalVolume& lv)
+    {
+        std::reverse(mtd.VG.PhysicalVolumes.begin(), mtd.VG.PhysicalVolumes.end());
+        std::reverse(lv.Segments.begin(), lv.Segments.end());
+    }
+
+
 }
 
 namespace Lvm::Backup
 {
-    void Agent::Restore(const std::string& archive) const
+    void Agent::Restore(const std::string& archivePath) const
     {
+        std::printf("[Restore demo, it is assumed that segments are linear only, LV is not big enough to be in memory]\n\n");   
         
+        int answer = 0;
+        do
+        {
+            std::printf("Restoring will erase some data on the physical volumes. \nContinue? (y,n):");
+            answer = std::getchar();
+        }while(answer != 'y' && answer != 'n');
+
+        if(answer == 'n')
+            exit(0);
+
+        std::printf("Opening archive...\n");
+        std::ifstream archive(archivePath, std::ios::binary);
+        assert(archive.is_open());
         
+        std::printf("Checking the Magic.\n");
+        uint64_t buf64;
+        archive.read(reinterpret_cast<char*>(&buf64), sizeof(buf64));
+        assert(buf64 == ARCHIVE_MAGIC);
+        std::printf("Magic is correct.\n");
+
+        std::printf("Restoring metadatas of physical volumes...\n");
+        archive.read(reinterpret_cast<char*>(&buf64), sizeof(buf64));
+        std::printf("Number of Physical volumes that will be affected:%lu\n", buf64);
+
+        const uint64_t pv_count = buf64;
+        for(int i = 0; i < pv_count; ++i )
+        {
+            RawMtdInfo info;
+            archive.read(reinterpret_cast<char*>(&info), sizeof(info));
+            std::vector<char> rawMtd;
+            rawMtd.resize(info.DataSize);
+            archive.read(rawMtd.data(), info.DataSize);
+
+            std::ofstream dev(info.Name, std::ios::binary);
+            assert(dev.is_open());
+            dev.write(rawMtd.data(), rawMtd.size());
+
+            std::printf("%s's metadata is restored.\n", info.Name);
+        }
+        std::printf("Done.\n");
+
+        std::printf("Restoring segments...\n");
+        archive.read(reinterpret_cast<char*>(&buf64), sizeof(buf64));
+        const uint64_t segmentsCount = buf64;
+        std::vector<LinearSegmentDescription> segments;
+        segments.resize(segmentsCount);
+        archive.read(reinterpret_cast<char*>(segments.data()), sizeof(LinearSegmentDescription) * segmentsCount);
+        
+        archive.read(reinterpret_cast<char*>(&buf64), sizeof(buf64));
+        const uint64_t extent_size = buf64;
+        std::printf("extent_size:%lu\n", extent_size);
+
+        for(int i = 0; i < segments.size(); ++i)
+        {
+            std::printf("Segment info:\n");
+
+            const auto& segment = segments[i];
+            std::printf(" segment%d\n  extent_start:%lu extent_count:%lu device:%s offset:%lu pe_start:%lu\n", 
+                i+1, segment.StartExtent, segment.ExtentCount, segment.Device, segment.Offset, segment.PeStart);
+
+            std::ofstream dev(segment.Device, std::ios::binary);
+            assert(dev.is_open());
+
+            const uint64_t offset = segment.Offset * extent_size * SECTOR_SIZE + segment.PeStart * SECTOR_SIZE;
+            dev.seekp(offset, std::ios::beg);
+
+            std::vector<char> buf;
+            buf.resize(segment.ExtentCount * extent_size * SECTOR_SIZE);
+            archive.read(buf.data(), buf.size());
+            dev.write(buf.data(), buf.size());
+
+            std::printf(" segment is restored.\n");
+        }
     }
 
-    void Agent::Backup(const std::vector<std::string>& devices) const
+    void Agent::Backup(const std::string& lvName, const std::vector<std::string>& devices) const
     {
-        VgMtdMap mtdMap = CollectVgMtds(devices);
+        std::printf("[Backup demo, it is assumed that segments are linear only, LV is not big enough to be in memory]\n\n");
 
+        std::printf("Collecting VG metadatas...\n");
+        const VgMtdMap mtdMap = CollectVgMtds(devices);
+        std::printf("Done.\n");
+
+        std::printf("Finding a metadata with requested LV (%s)...\n", lvName.c_str());
+        auto&&[mtd, lv] = FindMtdWithLV(mtdMap, lvName);
+        GrammarFix(mtd, lv);//tmp huyak i v prodakshen
+        std::printf("Found. This LV belongs to VG(%s)\n", mtd.VG.Name.c_str());
+
+        const uint64_t extent_size = std::stoi(std::get<std::string>(mtd.VG.Parameters.at("extent_size")));
+        std::printf("extent_size:%lu\n", extent_size);
+
+        std::printf("Collecting physical volumes information in VG...\n");
+        const PvInfoMap pvInfoMap = CollectPhysicalVolumesInfos(mtd);
+        std::printf("Done.\n");
+
+        std::printf("Collecting all segments for the LV from VG metadata.\n");
+        std::vector<LinearSegmentDescription> segments = CollectSegmentDescriptions(lv, pvInfoMap);
+        std::printf("Done.\n");
+
+        std::printf("Collecting metadata of Physical Volumes that are used in LV...\n");
+        std::vector<RawMtd> rawMtds = CollectPhysicalVolumesRawMtd(segments);
+        std::printf("Done.\n");
+
+        std::printf("Reading whole LV into memory.\n");
+        char lvPath[256];
+        std::snprintf(lvPath, 255, "/dev/%s/%s", mtd.VG.Name.c_str(), lvName.c_str());
+        std::printf("lv path: %s\n", lvPath);
+        std::ifstream f(lvPath, std::ios::ate | std::ios::binary);
+        assert(f.is_open());
+        const size_t size = f.tellg();
+        std::printf("size:%lu (%f Gb)\n", size, static_cast<float>(size) / (1024.0f*1024.0f * 1024.0f));
+        std::vector<char> buf;
+        buf.resize(size);
+        f.seekg(std::ios::beg);
+        f.read(buf.data(), size);
+        std::printf("Done.\n");
+
+        const char* archiveName = "./archive";
+        std::printf("Creating archive...\nPath:%s\n", archiveName);
+        std::ofstream archive(archiveName, std::ios::binary);
+
+        uint64_t buf64;
+        //MAGIC
+        std::printf("Wrote a magic.\n");
+        buf64 = ARCHIVE_MAGIC;
+        archive.write(reinterpret_cast<char*>(&buf64), sizeof(buf64));
+        //Physical Volumes raw metadata
+        std::printf("Writing a pv metadatas...\n");
+        buf64 = rawMtds.size();
+        archive.write(reinterpret_cast<char*>(&buf64), sizeof(buf64)); 
+        for(const auto& rawMtd : rawMtds)
+        {
+            std::printf(" Device:%s\n DataSize:%lu\n", rawMtd.Info.Name, rawMtd.Info.DataSize);
+            archive.write(reinterpret_cast<const char*>(&rawMtd.Info), sizeof(rawMtd.Info));
+            archive.write(rawMtd.Data.data(), rawMtd.Data.size());
+        }
+        std::printf("Done.\n");
+        //Segments
+        buf64 = segments.size();
+        archive.write(reinterpret_cast<char*>(&buf64), sizeof(buf64));
+        for(const auto& segment : segments)
+            archive.write(reinterpret_cast<const char*>(&segment), sizeof(segment));
+        //LV itself
+        buf64 = extent_size;
+        archive.write(reinterpret_cast<char*>(&buf64), sizeof(buf64));
+        archive.write(buf.data(), buf.size());
+
+        std::printf("Archive is created now.\n");
     }
 
     VgMtdMap Agent::CollectVgMtds(const std::vector<std::string>& devices) const
@@ -92,6 +310,50 @@ namespace Lvm::Backup
         }
 
         return mtdMap;
+    }
+
+    RawMtd Agent::CollectRawMtd(const char* device) const
+    {
+        std::ifstream f(device);
+        assert(f.is_open());
+
+        std::optional<PhysicalVolumeLabelHeader> label = ReadPvLabel(f);
+        assert(label.has_value());
+        
+        RawMtd rawMtd;
+        std::memset(rawMtd.Info.Name, 0, 256);
+        std::snprintf(rawMtd.Info.Name, 255, "%s", device);
+
+        PhysicalVolumeHeader pvHeader = ReadPvHeader(f);
+        const size_t mdaOffset = pvHeader.MetadataDescriptors[0].DataAreaOffset;
+
+        f.seekg(mdaOffset, f.beg);
+        MtdHeader mtdHeader = ReadMtdHeader(f);
+
+        const char* mtdHeaderMagic = " LVM2 x[5A%r0N*>";
+        assert(strncmp(mtdHeaderMagic, mtdHeader.Signature, 16) == 0);
+            
+        std::vector<LocationDescriptor> locationsArea = ReadLocationsArea(f);
+        
+        auto& la = locationsArea[0];
+        rawMtd.Info.DataSize = mdaOffset + la.DataAreaOffset + la.DataAreaSize + 1;
+        rawMtd.Data.resize(rawMtd.Info.DataSize);
+        f.seekg(0, std::ios::beg);
+        f.read(rawMtd.Data.data(), rawMtd.Info.DataSize);
+
+        return rawMtd;
+    }
+
+    std::vector<RawMtd> Agent::CollectPhysicalVolumesRawMtd(const std::vector<LinearSegmentDescription>& segments) const
+    {
+        std::vector<RawMtd> rawMtds;
+        for(const auto& segment : segments)
+        {
+            RawMtd rawMtd = CollectRawMtd(segment.Device);
+            rawMtds.push_back(rawMtd);
+        }
+
+        return rawMtds;
     }
 
     std::optional<Metadata> Agent::ReadVgMtd(const std::string& dev) const
@@ -160,7 +422,7 @@ namespace Lvm::Backup
 
         std::vector<LocationDescriptor> locationsArea = ReadLocationsArea(f);
 
-        std::printf("LENGTH: %d\n", locationsArea.size());
+        std::printf("LENGTH: %lu\n", locationsArea.size());
         for(auto& la : locationsArea)
         {
             f.seekg(pvHeader.MetadataDescriptors[0].DataAreaOffset + la.DataAreaOffset, f.beg);
@@ -171,9 +433,21 @@ namespace Lvm::Backup
             buf[4095] = '\0';
 
             std::printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
-            std::printf("%s\nsize:%d\n", buf,n);
+            std::printf("%s\nsize:%lu\n", buf,n);
         }
         
+    }
+
+    void Agent::DumpMTDs(const std::vector<std::string>& devices) const
+    {
+        for(auto& dev : devices)
+            std::printf("dev:%s\n", dev.c_str());
+
+        VgMtdMap map = CollectVgMtds(devices);
+        for(auto&[name, mtd] : map)
+        {
+            std::printf("name:%s\n", name.c_str());
+        }
     }
 
     std::optional<PhysicalVolumeLabelHeader> Agent::ReadPvLabel(std::ifstream& f) const
