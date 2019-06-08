@@ -29,7 +29,7 @@ int main(int argc, char** argv)
 
 		default:
 		{
-			std::printf("Usage: %s [-r archive_name | -b logical_volume {e.g. /dev/SomeVolumeGroup/LV1}]\n"
+			std::printf("Usage: %s [-r archive_name | -b logical_volume ]\n"
 						"-r: restore lv from the archive.\n"
 						"-b: backup lv to the archive.\n", argv[0]);
 			return -1;
